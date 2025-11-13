@@ -10,8 +10,8 @@ const router = express.Router();
 const users = [];
 
 // Ambil Kunci dari Environment Variables
-const privateKey = process.env.JWT_PRIVATE_KEY.replace(/\\n/g, '\n');
-const publicKey = process.env.JWT_PUBLIC_KEY.replace(/\\n/g, '\n');
+const privateKey = process.env.JWT_PRIVATE_KEY;
+const publicKey = process.env.JWT_PUBLIC_KEY;
 
 // POST /api/users/register - Registrasi user baru
 router.post('/register', validateRegister, async (req, res) => {
