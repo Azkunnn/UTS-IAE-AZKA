@@ -2,7 +2,7 @@
 version: '3.8'
 
 services:
-  # REST API Service
+  # REST API Service (Berfungsi sbg User Service)
   rest-api:
     build: ./services/rest-api
     ports:
@@ -10,6 +10,10 @@ services:
     environment:
       - PORT=3001
       - NODE_ENV=development
+      # --- CONTOH PENGISIAN KUNCI JWT ---
+      - JWT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n...\n...abc\n-----END RSA PRIVATE KEY-----"
+      - JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqh...\n...\n...xyz\n-----END PUBLIC KEY-----"
+
     volumes:
       - ./services/rest-api:/app
       - /app/node_modules
@@ -17,7 +21,7 @@ services:
     networks:
       - microservices-network
 
-  # GraphQL API Service
+  # GraphQL API Service (Berfungsi sbg Task Service)
   graphql-api:
     build: ./services/graphql-api
     ports:
@@ -39,6 +43,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      # Nama service ini sudah benar (mengacu ke nama service di atas)
       - REST_API_URL=http://rest-api:3001
       - GRAPHQL_API_URL=http://graphql-api:4000
       - NODE_ENV=development
@@ -61,7 +66,8 @@ services:
       - "3002:3000"
     environment:
       - NEXT_PUBLIC_API_GATEWAY_URL=http://localhost:3000
-      - NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
+      # --- TAMBAHKAN URL WEBSOCKET ---
+      - NEXT_PUBLIC_API_GATEWAY_WS_URL=ws://localhost:3000/graphql
     depends_on:
       - api-gateway
     volumes:

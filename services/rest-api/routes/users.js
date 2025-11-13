@@ -1,175 +1,122 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { validateUser, validateUserUpdate } = require('../middleware/validation');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const { validateRegister, validateLogin } = require('../middleware/validation');
 
 const router = express.Router();
 
-// In-memory database (replace with real database in production)
-let users = [
-  {
-    id: '1',
-    name: 'John Doe',
-    email: 'john@example.com',
-    age: 30,
-    role: 'admin',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: '2',
-    name: 'Jane Smith',
-    email: 'jane@example.com',
-    age: 25,
-    role: 'user',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
-];
+// Database In-memory (ganti dengan database sungguhan di produksi)
+const users = [];
 
-// GET /api/users - Get all users
-router.get('/', (req, res) => {
-  const { page, limit, role, search } = req.query;
-  
-  let filteredUsers = [...users];
-  
-  // Filter by role
-  if (role) {
-    filteredUsers = filteredUsers.filter(user => user.role === role);
-  }
-  
-  // Search by name or email
-  if (search) {
-    filteredUsers = filteredUsers.filter(user => 
-      user.name.toLowerCase().includes(search.toLowerCase()) ||
-      user.email.toLowerCase().includes(search.toLowerCase())
-    );
-  }
-  
-  // If pagination params provided, return paginated response
-  if (page && limit) {
-    const startIndex = (page - 1) * limit;
-    const endIndex = page * limit;
-    const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
-    
-    return res.json({
-      users: paginatedUsers,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(filteredUsers.length / limit),
-        totalUsers: filteredUsers.length,
-        hasNext: endIndex < filteredUsers.length,
-        hasPrev: startIndex > 0
-      }
-    });
-  }
-  
-  // Otherwise return all users as simple array
-  res.json(filteredUsers);
-});
+// Ambil Kunci dari Environment Variables
+const privateKey = process.env.JWT_PRIVATE_KEY.replace(/\\n/g, '\n');
+const publicKey = process.env.JWT_PUBLIC_KEY.replace(/\\n/g, '\n');
 
-// GET /api/users/:id - Get user by ID
-router.get('/:id', (req, res) => {
-  const user = users.find(u => u.id === req.params.id);
-  
-  if (!user) {
-    return res.status(404).json({
-      error: 'User not found',
-      message: `User with ID ${req.params.id} does not exist`
-    });
-  }
-  
-  res.json(user);
-});
+// POST /api/users/register - Registrasi user baru
+router.post('/register', validateRegister, async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
 
-// POST /api/users - Create new user
-router.post('/', validateUser, (req, res) => {
-  const { name, email, age, role = 'user' } = req.body;
-  
-  // Check if email already exists
-  const existingUser = users.find(u => u.email === email);
-  if (existingUser) {
-    return res.status(409).json({
-      error: 'Email already exists',
-      message: 'A user with this email already exists'
-    });
-  }
-  
-  const newUser = {
-    id: uuidv4(),
-    name,
-    email,
-    age,
-    role,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  
-  users.push(newUser);
-  
-  res.status(201).json({
-    message: 'User created successfully',
-    user: newUser
-  });
-});
-
-// PUT /api/users/:id - Update user
-router.put('/:id', validateUserUpdate, (req, res) => {
-  const userIndex = users.findIndex(u => u.id === req.params.id);
-  
-  if (userIndex === -1) {
-    return res.status(404).json({
-      error: 'User not found',
-      message: `User with ID ${req.params.id} does not exist`
-    });
-  }
-  
-  const { name, email, age, role } = req.body;
-  
-  // Check if email already exists (excluding current user)
-  if (email) {
-    const existingUser = users.find(u => u.email === email && u.id !== req.params.id);
+    const existingUser = users.find(u => u.email === email);
     if (existingUser) {
-      return res.status(409).json({
-        error: 'Email already exists',
-        message: 'A user with this email already exists'
-      });
+      return res.status(409).json({ error: 'Email already exists' });
     }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = {
+      id: uuidv4(),
+      name,
+      email,
+      password: hashedPassword,
+      teams: [], // Tambahan untuk 'teams'
+      createdAt: new Date().toISOString()
+    };
+
+    users.push(newUser);
+    console.log('User registered:', newUser.email);
+
+    res.status(201).json({
+      message: 'User created successfully',
+      user: { id: newUser.id, name: newUser.name, email: newUser.email }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error', message: error.message });
   }
-  
-  const updatedUser = {
-    ...users[userIndex],
-    ...(name && { name }),
-    ...(email && { email }),
-    ...(age && { age }),
-    ...(role && { role }),
-    updatedAt: new Date().toISOString()
-  };
-  
-  users[userIndex] = updatedUser;
-  
+});
+
+// POST /api/users/login - Login user dan dapatkan JWT
+router.post('/login', validateLogin, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = users.find(u => u.email === email);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Buat JWT Payload
+    const payload = {
+      sub: user.id, // Subject (standard JWT claim)
+      name: user.name,
+      email: user.email,
+    };
+
+    // Buat token menggunakan Private Key
+    const token = jwt.sign(payload, privateKey, {
+      algorithm: 'RS256', // Algoritma Asymmetric
+      expiresIn: '1h' // Token berlaku 1 jam
+    });
+
+    console.log('User logged in:', user.email);
+    res.json({
+      message: 'Login successful',
+      token: token
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Server error', message: error.message });
+  }
+});
+
+// GET /api/users/auth/public-key - Endpoint untuk API Gateway
+// Ini adalah endpoint PUBLIK baru
+router.get('/auth/public-key', (req, res) => {
+  // Kirim public key sebagai plain text
+  res.type('application/x-pem-file').send(publicKey);
+});
+
+// GET /api/users/me - Contoh rute terproteksi
+// Rute ini akan mengandalkan API Gateway untuk verifikasi
+router.get('/me', (req, res) => {
+  // Gateway akan menambahkan header 'x-user-id' setelah verifikasi token
+  const userId = req.headers['x-user-id']; 
+  if(!userId) {
+    // Ini seharusnya tidak terjadi jika gateway disetup dgn benar
+    return res.status(401).json({ error: 'Not authorized' });
+  }
+
+  const user = users.find(u => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
   res.json({
-    message: 'User updated successfully',
-    user: updatedUser
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    teams: user.teams
   });
 });
 
-// DELETE /api/users/:id - Delete user
-router.delete('/:id', (req, res) => {
-  const userIndex = users.findIndex(u => u.id === req.params.id);
-  
-  if (userIndex === -1) {
-    return res.status(404).json({
-      error: 'User not found',
-      message: `User with ID ${req.params.id} does not exist`
-    });
-  }
-  
-  const deletedUser = users.splice(userIndex, 1)[0];
-  
-  res.json({
-    message: 'User deleted successfully',
-    user: deletedUser
-  });
-});
+// Hapus semua rute lama (GET /, GET /:id, POST /, PUT /, DELETE /)
+// ...
 
 module.exports = router;

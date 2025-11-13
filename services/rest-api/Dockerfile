@@ -1,6 +1,8 @@
 # REST API Dockerfile
 FROM node:18-alpine
 
+RUN apk add --no-cache --virtual .build-deps python3 make g++
+
 WORKDIR /app
 
 COPY package*.json ./

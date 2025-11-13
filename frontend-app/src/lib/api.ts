@@ -9,13 +9,38 @@ export const apiClient = axios.create({
   },
 });
 
-// User API calls
+// Tambahkan interceptor untuk menyisipkan token
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('jwt-token');
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+
+// API untuk User/Auth
+export const authApi = {
+  login: (data: { email: string; password: string }) => 
+    apiClient.post('/api/users/login', data),
+    
+  register: (data: { name: string; email: string; password: string }) =>
+    apiClient.post('/api/users/register', data),
+    
+  getMe: () => 
+    apiClient.get('/api/users/me'),
+};
+
+// Ganti userApi lama dengan authApi
+// Hapus/Komentari userApi lama
+/*
 export const userApi = {
   getUsers: () => apiClient.get('/api/users'),
-  getUser: (id: string) => apiClient.get(`/api/users/${id}`),
-  createUser: (userData: { name: string; email: string; age: number }) => 
-    apiClient.post('/api/users', userData),
-  updateUser: (id: string, userData: { name?: string; email?: string; age?: number }) => 
-    apiClient.put(`/api/users/${id}`, userData),
-  deleteUser: (id: string) => apiClient.delete(`/api/users/${id}`),
+  ...
 };
+*/

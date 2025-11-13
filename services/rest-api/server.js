@@ -1,3 +1,5 @@
+require('dotenv').config(); // Tambahkan ini di baris paling atas
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -12,12 +14,12 @@ const PORT = process.env.PORT || 3001;
 app.use(helmet());
 app.use(cors());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
+// // Rate limiting
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 100 // limit each IP to 100 requests per windowMs
+// });
+// app.use(limiter);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -27,13 +29,14 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
-    service: 'REST API Service',
+    service: 'User Service (REST)', // Ubah nama
     timestamp: new Date().toISOString()
   });
 });
 
 // Routes
-app.use('/api/users', userRoutes);
+// Semua rute (login, register, public-key) ada di /api/users
+app.use('/api/users', userRoutes); 
 
 // Error handling middleware
 app.use(errorHandler);
@@ -47,7 +50,8 @@ app.use('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 REST API Service running on port ${PORT}`);
+  // Ubah log agar jelas
+  console.log(`🚀 User Service (REST API) running on port ${PORT}`);
   console.log(`📋 Health check: http://localhost:${PORT}/health`);
 });
 
