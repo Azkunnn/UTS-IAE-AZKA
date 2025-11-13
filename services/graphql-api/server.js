@@ -1,12 +1,8 @@
 const express = require('express');
 const { ApolloServer } = require('apollo-server-express');
-const { PubSub, withFilter } = require('graphql-subscriptions'); // Import withFilter
+const { PubSub } = require('graphql-subscriptions');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
-const { createServer } = require('http'); // Untuk subscriptions
-const { execute, subscribe } = require('graphql');
-const { SubscriptionServer } = require('subscriptions-transport-ws');
-const { makeExecutableSchema } = require('@graphql-tools/schema');
 
 const app = express();
 const pubsub = new PubSub();
@@ -16,185 +12,266 @@ app.use(cors({
   origin: [
     'http://localhost:3000', // API Gateway
     'http://localhost:3002', // Frontend
-    'http://api-gateway:3000', 
-    'http://frontend-app:3002' 
+    'http://api-gateway:3000', // Docker container name
+    'http://frontend-app:3002' // Docker container name
   ],
   credentials: true
 }));
 
-// Database In-memory (Tasks)
-let tasks = [
+// In-memory data store (replace with real database in production)
+let posts = [
   {
     id: '1',
-    title: 'Design database schema',
-    description: 'Design schema for user, team, and task tables',
-    status: 'IN_PROGRESS',
-    assigneeId: '1', 
-    teamId: 'team-1', // ID Tim
+    title: 'Welcome to GraphQL',
+    content: 'This is our first GraphQL post with subscriptions!',
+    author: 'GraphQL Team',
     createdAt: new Date().toISOString(),
   },
   {
     id: '2',
-    title: 'Implement JWT Authentication',
-    description: 'Implement RS256 JWT auth in user-service',
-    status: 'TODO',
-    assigneeId: '2',
-    teamId: 'team-1',
+    title: 'Real-time Updates',
+    content: 'Watch this space for real-time updates using GraphQL subscriptions.',
+    author: 'Development Team',
     createdAt: new Date().toISOString(),
   }
 ];
 
-// GraphQL type definitions (Skema)
-const typeDefs = `
-  enum TaskStatus {
-    TODO
-    IN_PROGRESS
-    DONE
-    ARCHIVED
+let comments = [
+  {
+    id: '1',
+    postId: '1',
+    content: 'Great introduction to GraphQL!',
+    author: 'John Doe',
+    createdAt: new Date().toISOString(),
   }
+];
 
-  type Task {
+// GraphQL type definitions
+const typeDefs = `
+  type Post {
     id: ID!
     title: String!
-    description: String
-    status: TaskStatus!
-    assigneeId: ID
-    teamId: ID!
+    content: String!
+    author: String!
+    createdAt: String!
+    comments: [Comment!]!
+  }
+
+  type Comment {
+    id: ID!
+    postId: ID!
+    content: String!
+    author: String!
     createdAt: String!
   }
 
   type Query {
-    tasks(teamId: ID!): [Task!]!
-    task(id: ID!): Task
+    posts: [Post!]!
+    post(id: ID!): Post
+    comments(postId: ID!): [Comment!]!
   }
 
   type Mutation {
-    createTask(title: String!, description: String, teamId: ID!, assigneeId: ID): Task!
-    updateTaskStatus(id: ID!, status: TaskStatus!): Task!
-    assignTask(id: ID!, assigneeId: ID!): Task!
+    createPost(title: String!, content: String!, author: String!): Post!
+    updatePost(id: ID!, title: String, content: String): Post!
+    deletePost(id: ID!): Boolean!
+    createComment(postId: ID!, content: String!, author: String!): Comment!
+    deleteComment(id: ID!): Boolean!
   }
 
   type Subscription {
-    taskUpdated(teamId: ID!): Task!
-    taskAdded(teamId: ID!): Task!
+    postAdded: Post!
+    commentAdded: Comment!
+    postUpdated: Post!
+    postDeleted: ID!
   }
 `;
 
-// GraphQL resolvers (Logika)
+// GraphQL resolvers
 const resolvers = {
   Query: {
-    tasks: (_, { teamId }) => tasks.filter(task => task.teamId === teamId),
-    task: (_, { id }) => tasks.find(task => task.id === id),
+    posts: () => posts,
+    post: (_, { id }) => posts.find(post => post.id === id),
+    comments: (_, { postId }) => comments.filter(comment => comment.postId === postId),
+  },
+
+  Post: {
+    comments: (parent) => comments.filter(comment => comment.postId === parent.id),
   },
 
   Mutation: {
-    createTask: (_, { title, description, teamId, assigneeId }) => {
-      const newTask = {
+    createPost: (_, { title, content, author }) => {
+      const newPost = {
         id: uuidv4(),
         title,
-        description: description || '',
-        status: 'TODO',
-        assigneeId: assigneeId || null,
-        teamId,
+        content,
+        author,
         createdAt: new Date().toISOString(),
       };
-      tasks.push(newTask);
-      pubsub.publish('TASK_ADDED', { taskAdded: newTask });
-      return newTask;
+      posts.push(newPost);
+      
+      // Publish to subscribers
+      pubsub.publish('POST_ADDED', { postAdded: newPost });
+      
+      return newPost;
     },
 
-    updateTaskStatus: (_, { id, status }) => {
-      const taskIndex = tasks.findIndex(task => task.id === id);
-      if (taskIndex === -1) {
-        throw new Error('Task not found');
+    updatePost: (_, { id, title, content }) => {
+      const postIndex = posts.findIndex(post => post.id === id);
+      if (postIndex === -1) {
+        throw new Error('Post not found');
       }
-      const updatedTask = { ...tasks[taskIndex], status };
-      tasks[taskIndex] = updatedTask;
-      pubsub.publish('TASK_UPDATED', { taskUpdated: updatedTask });
-      return updatedTask;
+
+      const updatedPost = {
+        ...posts[postIndex],
+        ...(title && { title }),
+        ...(content && { content }),
+      };
+
+      posts[postIndex] = updatedPost;
+      
+      // Publish to subscribers
+      pubsub.publish('POST_UPDATED', { postUpdated: updatedPost });
+      
+      return updatedPost;
     },
-    
-    assignTask: (_, { id, assigneeId }) => {
-      const taskIndex = tasks.findIndex(task => task.id === id);
-      if (taskIndex === -1) {
-        throw new Error('Task not found');
+
+    deletePost: (_, { id }) => {
+      const postIndex = posts.findIndex(post => post.id === id);
+      if (postIndex === -1) {
+        return false;
       }
-      const updatedTask = { ...tasks[taskIndex], assigneeId };
-      tasks[taskIndex] = updatedTask;
-      pubsub.publish('TASK_UPDATED', { taskUpdated: updatedTask });
-      return updatedTask;
-    }
+
+      // Remove associated comments
+      comments = comments.filter(comment => comment.postId !== id);
+      
+      // Remove post
+      posts.splice(postIndex, 1);
+      
+      // Publish to subscribers
+      pubsub.publish('POST_DELETED', { postDeleted: id });
+      
+      return true;
+    },
+
+    createComment: (_, { postId, content, author }) => {
+      const post = posts.find(p => p.id === postId);
+      if (!post) {
+        throw new Error('Post not found');
+      }
+
+      const newComment = {
+        id: uuidv4(),
+        postId,
+        content,
+        author,
+        createdAt: new Date().toISOString(),
+      };
+      
+      comments.push(newComment);
+      
+      // Publish to subscribers
+      pubsub.publish('COMMENT_ADDED', { commentAdded: newComment });
+      
+      return newComment;
+    },
+
+    deleteComment: (_, { id }) => {
+      const commentIndex = comments.findIndex(comment => comment.id === id);
+      if (commentIndex === -1) {
+        return false;
+      }
+
+      comments.splice(commentIndex, 1);
+      return true;
+    },
   },
 
   Subscription: {
-    taskUpdated: {
-      subscribe: withFilter(
-        () => pubsub.asyncIterator(['TASK_UPDATED']),
-        (payload, variables) => {
-          return payload.taskUpdated.teamId === variables.teamId;
-        }
-      ),
+    postAdded: {
+      subscribe: () => pubsub.asyncIterator(['POST_ADDED']),
     },
-    taskAdded: {
-      subscribe: withFilter(
-        () => pubsub.asyncIterator(['TASK_ADDED']),
-        (payload, variables) => {
-          return payload.taskAdded.teamId === variables.teamId;
-        }
-      ),
-    }
+    commentAdded: {
+      subscribe: () => pubsub.asyncIterator(['COMMENT_ADDED']),
+    },
+    postUpdated: {
+      subscribe: () => pubsub.asyncIterator(['POST_UPDATED']),
+    },
+    postDeleted: {
+      subscribe: () => pubsub.asyncIterator(['POST_DELETED']),
+    },
   },
 };
 
-const schema = makeExecutableSchema({ typeDefs, resolvers });
-
 async function startServer() {
+  // Create Apollo Server
   const server = new ApolloServer({
-    schema,
+    typeDefs,
+    resolvers,
     context: ({ req }) => {
-      // Akses header yang di-inject oleh gateway
-      const userId = req.headers['x-user-id'];
-      const userEmail = req.headers['x-user-email'];
-      console.log(`[Task Service] Request received from user: ${userEmail} (${userId})`);
-      return { userId, userEmail };
+      // Add authentication logic here if needed
+      return { req };
     },
+    plugins: [
+      {
+        requestDidStart() {
+          return {
+            willSendResponse(requestContext) {
+              console.log(`GraphQL ${requestContext.request.operationName || 'Anonymous'} operation completed`);
+            },
+          };
+        },
+      },
+    ],
   });
 
   await server.start();
   server.applyMiddleware({ app, path: '/graphql' });
 
   const PORT = process.env.PORT || 4000;
-  const httpServer = createServer(app);
-
-  httpServer.listen(PORT, () => {
-    console.log(`🚀 Task Service (GraphQL) running on port ${PORT}`);
-    console.log(`🎯 GraphQL endpoint: http://localhost:${PORT}${server.graphqlPath}`);
-    
-    new SubscriptionServer({
-      execute,
-      subscribe,
-      schema,
-    }, {
-      server: httpServer,
-      path: '/graphql',
-    });
-    console.log(`🔌 Subscriptions ready at ws://localhost:${PORT}/graphql`);
+  
+  const httpServer = app.listen(PORT, () => {
+    console.log(`🚀 GraphQL API Server running on port ${PORT}`);
+    console.log(`🔗 GraphQL endpoint: http://localhost:${PORT}${server.graphqlPath}`);
+    console.log(`📊 GraphQL Playground: http://localhost:${PORT}${server.graphqlPath}`);
+    console.log(`📡 Subscriptions ready`);
   });
 
-  // Health check
-  app.get('/health', (req, res) => {
-    res.json({ 
-      status: 'healthy',
-      service: 'Task Service (GraphQL)', // Ubah nama
-      timestamp: new Date().toISOString(),
-      data: {
-        tasks: tasks.length
-      }
+  // Setup subscriptions
+  server.installSubscriptionHandlers(httpServer);
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    httpServer.close(() => {
+      console.log('Process terminated');
     });
   });
 }
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    service: 'graphql-api',
+    timestamp: new Date().toISOString(),
+    data: {
+      posts: posts.length,
+      comments: comments.length
+    }
+  });
+});
+
+// Error handling
+app.use((err, req, res, next) => {
+  console.error('GraphQL API Error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
+});
+
 startServer().catch(error => {
-  console.error('Failed to start Task Service:', error);
+  console.error('Failed to start GraphQL server:', error);
   process.exit(1);
 });

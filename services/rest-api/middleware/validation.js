@@ -1,42 +1,52 @@
 const Joi = require('joi');
 
-// Skema validasi untuk registrasi
-const registerSchema = Joi.object({
+// User validation schema
+const userSchema = Joi.object({
   name: Joi.string().min(2).max(50).required(),
   email: Joi.string().email().required(),
-  password: Joi.string().min(6).required()
+  age: Joi.number().integer().min(1).max(150).required(),
+  role: Joi.string().valid('admin', 'user', 'moderator').optional()
 });
 
-// Skema validasi untuk login
-const loginSchema = Joi.object({
-  email: Joi.string().email().required(),
-  password: Joi.string().required()
-});
+// User update validation schema (all fields optional)
+const userUpdateSchema = Joi.object({
+  name: Joi.string().min(2).max(50).optional(),
+  email: Joi.string().email().optional(),
+  age: Joi.number().integer().min(1).max(150).optional(),
+  role: Joi.string().valid('admin', 'user', 'moderator').optional()
+}).min(1); // At least one field must be provided
 
-const validateRegister = (req, res, next) => {
-  const { error } = registerSchema.validate(req.body);
+// Validation middleware for creating users
+const validateUser = (req, res, next) => {
+  const { error } = userSchema.validate(req.body);
+  
   if (error) {
     return res.status(400).json({
       error: 'Validation error',
-      message: error.details[0].message
+      message: error.details[0].message,
+      details: error.details
     });
   }
+  
   next();
 };
 
-const validateLogin = (req, res, next) => {
-  const { error } = loginSchema.validate(req.body);
+// Validation middleware for updating users
+const validateUserUpdate = (req, res, next) => {
+  const { error } = userUpdateSchema.validate(req.body);
+  
   if (error) {
     return res.status(400).json({
       error: 'Validation error',
-      message: error.details[0].message
+      message: error.details[0].message,
+      details: error.details
     });
   }
+  
   next();
 };
 
-// Ganti export
 module.exports = {
-  validateRegister,
-  validateLogin
+  validateUser,
+  validateUserUpdate
 };
